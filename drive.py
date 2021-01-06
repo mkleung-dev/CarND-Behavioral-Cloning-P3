@@ -30,11 +30,23 @@ class SimplePIController:
         self.error = 0.
         self.integral = 0.
 
+        self.speed_0_count = 0
+
     def set_desired(self, desired):
         self.set_point = desired
 
     def update(self, measurement):
         # proportional error
+        if measurement < 0.05:
+            self.speed_0_count = self.speed_0_count + 1
+        else:
+            self.speed_0_count = 0
+
+        if self.speed_0_count > 10:
+            self.error = 0.
+            self.integral = 0.
+            print('Reset Reset')
+            return -0.1
         self.error = self.set_point - measurement
 
         # integral error
