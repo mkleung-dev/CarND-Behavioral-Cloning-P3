@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import sklearn
 from sklearn.model_selection import train_test_split
 import math
+import cv2
 
 import keras
 from keras.models import Sequential
@@ -18,6 +19,14 @@ from keras.layers import Cropping2D
 def readFromFile(folder_name):
     samples = []
     
+    steering_offset = 0
+
+    if folder_name.find('left_recovery') >= 0:
+        steering_offset = float(folder_name.split('_')[-1]) / 100.0
+
+    elif folder_name.find('right_recovery') >= 0:
+        steering_offset = -float(folder_name.split('_')[-1]) / 100.0
+
     with open(os.path.join('data', folder_name, 'driving_log.csv')) as csv_file:
         reader = csv.reader(csv_file)
         for line in reader:
@@ -35,43 +44,244 @@ def readFromFile(folder_name):
             center_file_name = os.path.join('data', folder_name, 'IMG', center_file_name)
             left_file_name = os.path.join('data', folder_name, 'IMG', left_file_name)
             right_file_name = os.path.join('data', folder_name, 'IMG', right_file_name)
-            steering = float(line[3])
+            steering = float(line[3]) + steering_offset
             samples.append([center_file_name, left_file_name, right_file_name, steering])
             samples.append([center_file_name, left_file_name, right_file_name, steering])
 
     return np.array(samples)
 
-def data_generator(samples, batch_size=32):
-    multiple_camera_correction = 0.12
+def get_sample_count_1(samples):
+    multiple_camera_correction = 0.15
 
     flips = np.zeros((samples.shape[0] * 3, ), dtype=int)
     flips = np.concatenate((flips, np.ones((samples.shape[0] * 3,), dtype=int)), axis=0)
 
     file_names = np.concatenate((samples[:,0], samples[:,1], samples[:,2]), axis=0)
+    file_names = np.concatenate((file_names, samples[:,0], samples[:,1], samples[:,2]), axis=0)
 
     steerings = np.array(samples[:,3], np.float)
     steerings = np.concatenate((steerings, steerings + multiple_camera_correction, steerings - multiple_camera_correction), axis=0)
+    steerings = np.concatenate((steerings, -steerings), axis=0)
+    
+    file_names, steerings, flips = sklearn.utils.shuffle(file_names, steerings, flips)
 
-    sample_count = steerings.shape[0]
+    #filtering
+    filtered_file_names = file_names[np.abs(steerings) >= 0.2]
+    filtered_steerings = steerings[np.abs(steerings) >= 0.2]
+    filtered_flips = flips[np.abs(steerings) >= 0.2]
+
+    filtered_0_file_names = file_names[np.abs(steerings) <= 0.2]
+    filtered_0_steerings = steerings[np.abs(steerings) <= 0.2]
+    filtered_0_flips = flips[np.abs(steerings) <= 0.2]
+
+    filtered_0_file_names = filtered_0_file_names[0:filtered_file_names.shape[0]]
+    filtered_0_steerings = filtered_0_steerings[0:filtered_steerings.shape[0]]
+    filtered_0_flips = filtered_0_flips[0:filtered_flips.shape[0]]
+
+    filtered_file_names = np.concatenate((filtered_file_names, filtered_0_file_names), axis=0)
+    filtered_steerings = np.concatenate((filtered_steerings, filtered_0_steerings), axis=0)
+    filtered_flips = np.concatenate((filtered_flips, filtered_0_flips), axis=0)
+
+    filtered_file_names, filtered_steerings, filtered_flips = sklearn.utils.shuffle(filtered_file_names, filtered_steerings, filtered_flips)
+
+    sample_count = filtered_steerings.shape[0]
+    return sample_count
+
+def get_sample_count_2(samples):
+    multiple_camera_correction = 0.15
+
+    flips = np.zeros((samples.shape[0] * 3, ), dtype=int)
+    flips = np.concatenate((flips, np.ones((samples.shape[0] * 3,), dtype=int)), axis=0)
+
+    file_names = np.concatenate((samples[:,0], samples[:,1], samples[:,2]), axis=0)
+    file_names = np.concatenate((file_names, samples[:,0], samples[:,1], samples[:,2]), axis=0)
+
+    steerings = np.array(samples[:,3], np.float)
+    steerings = np.concatenate((steerings, steerings + multiple_camera_correction, steerings - multiple_camera_correction), axis=0)
+    steerings = np.concatenate((steerings, -steerings), axis=0)
+    
+    file_names, steerings, flips = sklearn.utils.shuffle(file_names, steerings, flips)
+
+    #filtering
+    count_02 = (0.2 > np.abs(steerings)).sum()
+    count_04 = ((0.4 > np.abs(steerings)) & (np.abs(steerings) >= 0.2)).sum()
+    count_06 = ((0.6 > np.abs(steerings)) & (np.abs(steerings) >= 0.4)).sum()
+    count_08 = ((0.8 > np.abs(steerings)) & (np.abs(steerings) >= 0.6)).sum()
+    count_10 = (np.abs(steerings) >= 0.8).sum()
+
+    min_count = min(count_02, count_04, count_06, count_08, count_10)
+
+    filtered_file_names = file_names[0.2 > np.abs(steerings)][:min_count]
+    filtered_steerings = steerings[0.2 > np.abs(steerings)][:min_count]
+    filtered_flips = flips[0.2 > np.abs(steerings)][:min_count]
+    
+    filtered_file_names = np.concatenate((filtered_file_names, file_names[(0.4 > np.abs(steerings)) & (np.abs(steerings) >= 0.2)][:min_count]), axis=0)
+    filtered_steerings = np.concatenate((filtered_steerings, steerings[(0.4 > np.abs(steerings)) & (np.abs(steerings) >= 0.2)][:min_count]), axis=0)
+    filtered_flips = np.concatenate((filtered_flips, flips[(0.4 > np.abs(steerings)) & (np.abs(steerings) >= 0.2)][:min_count]), axis=0)
+
+    filtered_file_names = np.concatenate((filtered_file_names, file_names[(0.6 > np.abs(steerings)) & (np.abs(steerings) >= 0.4)][:min_count]), axis=0)
+    filtered_steerings = np.concatenate((filtered_steerings, steerings[(0.6 > np.abs(steerings)) & (np.abs(steerings) >= 0.4)][:min_count]), axis=0)
+    filtered_flips = np.concatenate((filtered_flips, flips[(0.6 > np.abs(steerings)) & (np.abs(steerings) >= 0.4)][:min_count]), axis=0)
+    
+    filtered_file_names = np.concatenate((filtered_file_names, file_names[(0.8 > np.abs(steerings)) & (np.abs(steerings) >= 0.6)][:min_count]), axis=0)
+    filtered_steerings = np.concatenate((filtered_steerings, steerings[(0.8 > np.abs(steerings)) & (np.abs(steerings) >= 0.6)][:min_count]), axis=0)
+    filtered_flips = np.concatenate((filtered_flips, flips[(0.8 > np.abs(steerings)) & (np.abs(steerings) >= 0.6)][:min_count]), axis=0)
+    
+    filtered_file_names = np.concatenate((filtered_file_names, file_names[np.abs(steerings) >= 0.8][:min_count]), axis=0)
+    filtered_steerings = np.concatenate((filtered_steerings, steerings[np.abs(steerings) >= 0.8][:min_count]), axis=0)
+    filtered_flips = np.concatenate((filtered_flips, flips[np.abs(steerings) >= 0.8][:min_count]), axis=0)
+
+    sample_count = filtered_steerings.shape[0]
+    return sample_count
+    
+
+def data_generator_1(samples, batch_size=32):
+    multiple_camera_correction = 0.15
+
+    flips = np.zeros((samples.shape[0] * 3, ), dtype=int)
+    flips = np.concatenate((flips, np.ones((samples.shape[0] * 3,), dtype=int)), axis=0)
+
+    file_names = np.concatenate((samples[:,0], samples[:,1], samples[:,2]), axis=0)
+    file_names = np.concatenate((file_names, samples[:,0], samples[:,1], samples[:,2]), axis=0)
+
+    steerings = np.array(samples[:,3], np.float)
+    steerings = np.concatenate((steerings, steerings + multiple_camera_correction, steerings - multiple_camera_correction), axis=0)
+    steerings = np.concatenate((steerings, -steerings), axis=0)
+    
     while True:
-        file_names, steerings = sklearn.utils.shuffle(file_names, steerings)
+        # shuffling
+        file_names, steerings, flips = sklearn.utils.shuffle(file_names, steerings, flips)
+
+        #filtering
+        filtered_file_names = file_names[np.abs(steerings) >= 0.2]
+        filtered_steerings = steerings[np.abs(steerings) >= 0.2]
+        filtered_flips = flips[np.abs(steerings) >= 0.2]
+
+        filtered_0_file_names = file_names[np.abs(steerings) <= 0.2]
+        filtered_0_steerings = steerings[np.abs(steerings) <= 0.2]
+        filtered_0_flips = flips[np.abs(steerings) <= 0.2]
+
+        filtered_0_file_names = filtered_0_file_names[0:filtered_file_names.shape[0]]
+        filtered_0_steerings = filtered_0_steerings[0:filtered_steerings.shape[0]]
+        filtered_0_flips = filtered_0_flips[0:filtered_flips.shape[0]]
+
+        filtered_file_names = np.concatenate((filtered_file_names, filtered_0_file_names), axis=0)
+        filtered_steerings = np.concatenate((filtered_steerings, filtered_0_steerings), axis=0)
+        filtered_flips = np.concatenate((filtered_flips, filtered_0_flips), axis=0)
+
+        filtered_file_names, filtered_steerings, filtered_flips = sklearn.utils.shuffle(filtered_file_names, filtered_steerings, filtered_flips)
+
+        sample_count = filtered_steerings.shape[0] 
+
         for offset in range(0, sample_count, batch_size):
-            batch_file_names = file_names[offset:offset+batch_size]
-            batch_steerings = steerings[offset:offset+batch_size]
-            batch_flips = flips[offset:offset+batch_size]
+            batch_file_names = filtered_file_names[offset:offset+batch_size]
+            batch_steerings = filtered_steerings[offset:offset+batch_size]
+            batch_flips = filtered_flips[offset:offset+batch_size]
             
             images = []
             for index, file_name in enumerate(batch_file_names):
                 image = mpimg.imread(file_name)
+                #image = cv2.cvtColor(image, cv2.COLOR_RGB2YUV)
                 if batch_flips[index] == 1:
                     image = np.fliplr(image)
-                    batch_steerings[index] = -batch_steerings[index]
                 images.append(image)
 
             x_train = np.array(images)
             y_train = np.array(batch_steerings)
             yield (x_train, y_train)
 
+def data_generator_2(samples, batch_size=32):
+    multiple_camera_correction = 0.15
+
+    flips = np.zeros((samples.shape[0] * 3, ), dtype=int)
+    flips = np.concatenate((flips, np.ones((samples.shape[0] * 3,), dtype=int)), axis=0)
+
+    file_names = np.concatenate((samples[:,0], samples[:,1], samples[:,2]), axis=0)
+    file_names = np.concatenate((file_names, samples[:,0], samples[:,1], samples[:,2]), axis=0)
+
+    steerings = np.array(samples[:,3], np.float)
+    steerings = np.concatenate((steerings, steerings + multiple_camera_correction, steerings - multiple_camera_correction), axis=0)
+    steerings = np.concatenate((steerings, -steerings), axis=0)
+    
+    while True:
+        # shuffling
+        file_names, steerings, flips = sklearn.utils.shuffle(file_names, steerings, flips)
+
+        #filtering
+        count_02 = (0.2 > np.abs(steerings)).sum()
+        count_04 = ((0.4 > np.abs(steerings)) & (np.abs(steerings) >= 0.2)).sum()
+        count_06 = ((0.6 > np.abs(steerings)) & (np.abs(steerings) >= 0.4)).sum()
+        count_08 = ((0.8 > np.abs(steerings)) & (np.abs(steerings) >= 0.6)).sum()
+        count_10 = (np.abs(steerings) >= 0.8).sum()
+
+        min_count = min(count_02, count_04, count_06, count_08, count_10)
+
+        filtered_file_names = file_names[0.2 > np.abs(steerings)][:min_count]
+        filtered_steerings = steerings[0.2 > np.abs(steerings)][:min_count]
+        filtered_flips = flips[0.2 > np.abs(steerings)][:min_count]
+        
+        filtered_file_names = np.concatenate((filtered_file_names, file_names[(0.4 > np.abs(steerings)) & (np.abs(steerings) >= 0.2)][:min_count]), axis=0)
+        filtered_steerings = np.concatenate((filtered_steerings, steerings[(0.4 > np.abs(steerings)) & (np.abs(steerings) >= 0.2)][:min_count]), axis=0)
+        filtered_flips = np.concatenate((filtered_flips, flips[(0.4 > np.abs(steerings)) & (np.abs(steerings) >= 0.2)][:min_count]), axis=0)
+
+        filtered_file_names = np.concatenate((filtered_file_names, file_names[(0.6 > np.abs(steerings)) & (np.abs(steerings) >= 0.4)][:min_count]), axis=0)
+        filtered_steerings = np.concatenate((filtered_steerings, steerings[(0.6 > np.abs(steerings)) & (np.abs(steerings) >= 0.4)][:min_count]), axis=0)
+        filtered_flips = np.concatenate((filtered_flips, flips[(0.6 > np.abs(steerings)) & (np.abs(steerings) >= 0.4)][:min_count]), axis=0)
+        
+        filtered_file_names = np.concatenate((filtered_file_names, file_names[(0.8 > np.abs(steerings)) & (np.abs(steerings) >= 0.6)][:min_count]), axis=0)
+        filtered_steerings = np.concatenate((filtered_steerings, steerings[(0.8 > np.abs(steerings)) & (np.abs(steerings) >= 0.6)][:min_count]), axis=0)
+        filtered_flips = np.concatenate((filtered_flips, flips[(0.8 > np.abs(steerings)) & (np.abs(steerings) >= 0.6)][:min_count]), axis=0)
+        
+        filtered_file_names = np.concatenate((filtered_file_names, file_names[np.abs(steerings) >= 0.8][:min_count]), axis=0)
+        filtered_steerings = np.concatenate((filtered_steerings, steerings[np.abs(steerings) >= 0.8][:min_count]), axis=0)
+        filtered_flips = np.concatenate((filtered_flips, flips[np.abs(steerings) >= 0.8][:min_count]), axis=0)
+
+        filtered_file_names, filtered_steerings, filtered_flips = sklearn.utils.shuffle(filtered_file_names, filtered_steerings, filtered_flips)
+
+        sample_count = filtered_steerings.shape[0] 
+
+        for offset in range(0, sample_count, batch_size):
+            batch_file_names = filtered_file_names[offset:offset+batch_size]
+            batch_steerings = filtered_steerings[offset:offset+batch_size]
+            batch_flips = filtered_flips[offset:offset+batch_size]
+            
+            images = []
+            for index, file_name in enumerate(batch_file_names):
+                image = mpimg.imread(file_name)
+                if batch_flips[index] == 1:
+                    image = np.fliplr(image)
+                images.append(image)
+
+            x_train = np.array(images)
+            y_train = np.array(batch_steerings)
+            yield (x_train, y_train)
+
+def behavioral_cloning_model_v2():
+    model = Sequential()
+    model.add(Lambda(lambda x: x / 255.0, input_shape=(160,320,3)))
+    model.add(Cropping2D(cropping=((40,20), (0,0))))
+    model.add(Conv2D(24, (5, 5), strides=(2, 2)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(36, (5, 5), strides=(2, 2)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(48, (5, 5), strides=(2, 2)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(64, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(Conv2D(64, (3, 3)))
+    model.add(Activation('relu'))
+    model.add(Flatten())
+    model.add(Dense(1164))
+    model.add(Activation('relu'))
+    model.add(Dense(100))
+    model.add(Activation('relu'))
+    model.add(Dense(50))
+    model.add(Activation('relu'))
+    model.add(Dense(10))
+    model.add(Activation('relu'))
+    model.add(Dense(1))
+
+    return model
 
 def behavioral_cloning_model():
     model = Sequential()
@@ -103,36 +313,100 @@ def behavioral_cloning_model():
 
     return model
 
-#folder_names = ['Normal', 'Reverse', 'sample_driving_data']
-#folder_names = ['sample_driving_data']
-#folder_names = ['Normal', 'Reverse', 'Normal2', 'Reverse2', 'Turn']
-#folder_names = ['track_1_normal_1', 'track_1_reverse_1', 'track_1_normal_2', 'track_1_reverse_2', 'track_1_normal_3', 'track_1_reverse_3', 'turn', 'sharp_turn']
-folder_names = ['track_1_normal_4', 'track_1_reverse_4', 'track_1_turn', 'track_1_sharp_turn_1', 'track_1_sharp_turn_2', 'track_1_normal_recovery', 'track_1_reverse_recovery', 'track_1_special_recovery']
-for index, folder_name in enumerate(folder_names):
-    if index == 0:
-        samples = readFromFile(folder_name)
-    else:
-        temp_samples = readFromFile(folder_name)
-        samples = np.concatenate((samples, temp_samples), axis=0)
+def run_model_for_track_1(output_file_name):
+    folder_names = ['method_2_track_1_normal', 'method_2_track_1_reverse',
+    'method_2_track_1_normal_left_recovery_015', 'method_2_track_1_normal_right_recovery_015',
+    'method_2_track_1_reverse_left_recovery_015', 'method_2_track_1_reverse_right_recovery_015']
 
-print(np.min(np.array(samples[:,3], np.float)))
-print(np.max(np.array(samples[:,3], np.float)))
+    for index, folder_name in enumerate(folder_names):
+        if index == 0:
+            samples = readFromFile(folder_name)
+        else:
+            temp_samples = readFromFile(folder_name)
+            samples = np.concatenate((samples, temp_samples), axis=0)
 
-train_samples, validation_samples = train_test_split(samples, test_size=0.3)
+    train_samples, validation_samples = train_test_split(samples, test_size=0.2)
 
-batch_size = 32
+    batch_size = 32
 
-train_data_generator = data_generator(train_samples, batch_size=batch_size)
-validation_data_generator = data_generator(validation_samples, batch_size=batch_size)
+    train_data_generator = data_generator_1(train_samples, batch_size=batch_size)
+    validation_data_generator = data_generator_1(validation_samples, batch_size=batch_size)
 
-adam = keras.optimizers.Adam(learning_rate=0.001)
-model = behavioral_cloning_model()
-model.compile(loss='mse', optimizer=adam)
-model.summary()
-model.fit_generator(train_data_generator,
-steps_per_epoch=math.ceil(len(train_samples)/batch_size),
-validation_data=validation_data_generator,
-validation_steps=math.ceil(len(validation_samples)/batch_size),
-epochs=10, verbose=1)
+    adam = keras.optimizers.Adam(learning_rate=0.001)
+    model = behavioral_cloning_model()
+    model.compile(loss='mse', optimizer=adam)
+    model.summary()
 
-model.save('model.h5')
+
+    history = model.fit_generator(train_data_generator,
+    steps_per_epoch=math.ceil(get_sample_count_1(train_samples)/batch_size),
+    validation_data=validation_data_generator,
+    validation_steps=math.ceil(get_sample_count_1(validation_samples)/batch_size),
+    epochs=10, verbose=1)
+
+    model.save(output_file_name)
+
+    # summarize history for loss
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'test'], loc='upper right')
+    plt.show()
+
+def run_model_for_track_1_and_track_2(output_file_name):
+    folder_names = [
+        'method_2_track_1_normal', 'method_2_track_1_reverse',
+        'method_2_track_1_normal_left_recovery_015', 'method_2_track_1_normal_right_recovery_015',
+        'method_2_track_1_reverse_left_recovery_015', 'method_2_track_1_reverse_right_recovery_015',
+        'method_2_track_2_normal_1','method_2_track_2_normal_2',
+        'method_2_track_2_reverse_1','method_2_track_2_reverse_2',
+        'method_2_track_2_normal_fantasy_1', 'method_2_track_2_normal_fantasy_2',
+        'method_2_track_2_reverse_fantasy_1', 'method_2_track_2_reverse_fantasy_2',
+        'method_2_track_2_left_normal_1','method_2_track_2_left_normal_2',
+        'method_2_track_2_left_reverse_1','method_2_track_2_left_reverse_2',
+        'method_2_track_2_left_normal_fantasy_1', 'method_2_track_2_left_normal_fantasy_2',
+        'method_2_track_2_left_reverse_fantasy_1', 'method_2_track_2_left_reverse_fantasy_2',
+        'method_2_track_2_special_1', 'method_2_track_2_special_1', 
+        'method_2_track_2_special_fantasy_1', 'method_2_track_2_special_fantasy_2']
+
+    for index, folder_name in enumerate(folder_names):
+        if index == 0:
+            samples = readFromFile(folder_name)
+        else:
+            temp_samples = readFromFile(folder_name)
+            samples = np.concatenate((samples, temp_samples), axis=0)
+
+    train_samples, validation_samples = train_test_split(samples, test_size=0.2)
+
+    batch_size = 32
+
+    train_data_generator = data_generator_2(train_samples, batch_size=batch_size)
+    validation_data_generator = data_generator_2(validation_samples, batch_size=batch_size)
+
+    adam = keras.optimizers.Adam(learning_rate=0.001)
+    model = behavioral_cloning_model()
+    model.compile(loss='mse', optimizer=adam)
+    model.summary()
+
+
+    history = model.fit_generator(train_data_generator,
+    steps_per_epoch=math.ceil(get_sample_count_2(train_samples)/batch_size),
+    validation_data=validation_data_generator,
+    validation_steps=math.ceil(get_sample_count_2(validation_samples)/batch_size),
+    epochs=10, verbose=1)
+
+    model.save(output_file_name)
+
+    # summarize history for loss
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'test'], loc='upper right')
+    plt.show()
+
+run_model_for_track_1('model_1.h5')
+run_model_for_track_1_and_track_2('model_1_and_2.h5')
