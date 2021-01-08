@@ -30,13 +30,15 @@ class SimplePIController:
         self.error = 0.
         self.integral = 0.
 
+        # Handle stalling of the car in track 2
         self.speed_0_count = 0
 
     def set_desired(self, desired):
         self.set_point = desired
 
     def update(self, measurement):
-        # proportional error
+
+        # Handle stalling of the car in track 2
         if measurement < 0.05:
             self.speed_0_count = self.speed_0_count + 1
         else:
@@ -47,6 +49,8 @@ class SimplePIController:
             self.integral = 0.
             print('Reset Reset')
             return -0.1
+
+        # proportional error
         self.error = self.set_point - measurement
 
         # integral error
