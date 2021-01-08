@@ -311,9 +311,11 @@ The model by this method could enable the car to run around both track 1 and tra
 ### 5. Simulation
 
 Here is the video recording of my vehicle driving autonomously around the track 1.
+
 [![track_1_video_beginning]](./video/video_track_1.mp4)
 
 Here is the video recording of my vehicle driving autonomously around the track 2.
+
 [![track_2_video_beginning]](./video/video_track_2.mp4)
 
 Occasionally, the car may stall around track.
